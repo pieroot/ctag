@@ -21,9 +21,9 @@
 # SOFTWARE.
 
 import os
-import fcntl
-from utils.softfilelock import MySoftFileLock
-fcntl.flock = MySoftFileLock
+#import fcntl
+#from utils.softfilelock import MySoftFileLock
+#fcntl.flock = MySoftFileLock
 import numpy as np
 import pandas as pd
 import torch

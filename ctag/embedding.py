@@ -24,6 +24,7 @@ import abc
 import torch
 import laion_clap
 from typing import Union, Iterable
+from load_caco import load_caco
 
 
 class BaseModel(abc.ABC):
@@ -86,3 +87,25 @@ class CLAPModel(BaseModel):
 
     def embed_text(self, text: Union[str, Iterable[str]]) -> torch.Tensor:
         return self.model.get_text_embedding(text, use_tensor=True)
+
+
+class CacoModel(BaseModel):
+    def __init__(
+        self,
+        ckpt_path: str,
+        enable_fusion: bool,
+        amodel: str,
+        tmodel: str,
+        compile: bool = True,
+        device: Union[str, torch.device] = "cpu"
+    ) -> None:
+        self.device = device
+        self.ckpt_path = ckpt_path
+        self.model_dict = load_caco(ckpt_path)
+        self.caco_model = self.model_dict['caco_model']
+
+    def embed_audio(self, audio: torch.Tensor, sample_rate: int) -> torch.Tensor:
+        return self.caco_model.get_audio_embedding(audio, use_tensor=True)
+
+    def embed_text(self, text: Union[str, Iterable[str]]) -> torch.Tensor:
+        return self.caco_model.get_text_embedding(text, use_tensor=True)
