@@ -7,6 +7,8 @@ from abc import ABC, abstractmethod
 from typing import List, Mapping
 from einops import rearrange
 import random
+import jax
+import jax.numpy as jnp
 
 @dataclass
 class DatasetLoader(ABC):
@@ -51,6 +53,48 @@ class Batch:
     text: np.ndarray
     text_input_ids: np.ndarray
     text_mask: np.ndarray
+
+def process_spectrogram(
+    spectrogram: jnp.ndarray,
+    time_patch_size: int = 16,
+    freq_patch_size: int = 16,
+    patches_seq_len: int = (100 * 10 * 8// 16),
+    seed: int = 0
+) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+
+    # Remove residual patches
+    spectrogram = spectrogram[:(spectrogram.shape[0] // time_patch_size) * time_patch_size]
+    num_time_patches = spectrogram.shape[0] // time_patch_size
+    num_freq_patches = spectrogram.shape[1] // freq_patch_size
+    full_patch_size = num_time_patches * num_freq_patches
+
+    x = jnp.reshape(spectrogram, [num_time_patches, time_patch_size,
+                                  num_freq_patches, freq_patch_size])
+
+    x = jnp.transpose(x, (0, 2, 1, 3))
+    x = jnp.reshape(x, [num_time_patches, num_freq_patches,
+                        time_patch_size * freq_patch_size])
+    x = x.reshape(-1, time_patch_size * freq_patch_size)
+
+    # Random sampling if sequence is longer
+    key = jax.random.PRNGKey(seed)
+    if full_patch_size > patches_seq_len:
+        keep_inds = jax.random.permutation(key, jnp.arange(full_patch_size))[:patches_seq_len]
+        keep_inds = jnp.sort(keep_inds)
+
+        x = x[keep_inds]
+        audio_mask = jnp.ones(patches_seq_len, dtype=jnp.int32)
+        time_inds = keep_inds // num_freq_patches
+        freq_inds = keep_inds % num_freq_patches
+    else:
+        audio_mask = (jnp.arange(patches_seq_len) < full_patch_size).astype(jnp.int32)
+        time_inds = (audio_mask * jnp.arange(patches_seq_len)) // num_freq_patches
+        freq_inds = (audio_mask * jnp.arange(patches_seq_len)) % num_freq_patches
+        x = jnp.pad(x, [(0, patches_seq_len - full_patch_size), (0, 0)],
+                    mode='constant', constant_values=0)
+
+    return x, time_inds, freq_inds, audio_mask
+
 
 def _dataset_process_map(
     batch: Mapping[str, tf.Tensor], 

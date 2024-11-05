@@ -27,10 +27,11 @@ import numpy
 import jax
 import jax.numpy as jnp
 import flax
+import tf2jax
 from typing import Union, Iterable
 from load_caco import load_caco
-from util import load_from_list
-from dataset import _dataset_process_map, DatasetConfig
+from util import load_from_list, compute_mel_spec_audiomae
+from dataset import process_spectrogram, DatasetConfig
 from einops import rearrange
 
 
@@ -121,19 +122,19 @@ class CacoModel(BaseModel):
                                     synthetic_prob=0.8)
         self.seed = [42, 3]
         
-        def compute_audio_embedding(audio_batch):
+        def compute_audio_embedding(x, time_inds, freq_inds, audio_mask):
             return self.caco_model.apply(
                 {'params': self.params},
-                audio_patches = jnp.expand_dims(jnp.array(audio_batch['audio_patches']), axis=0),
-                audio_time_inds = jnp.expand_dims(jnp.array(audio_batch['audio_time_inds']), axis=0),
-                audio_freq_inds = jnp.expand_dims(jnp.array(audio_batch['audio_freq_inds']), axis=0),
-                audio_mask = jnp.expand_dims(jnp.array(audio_batch['audio_mask']), axis=0),
+                audio_patches = x,
+                audio_time_inds = time_inds,
+                audio_freq_inds = freq_inds,
+                audio_mask = audio_mask,
                 deterministic=True,
                 return_hidden_state=False,
                 normalize=True,
                 method=self.caco_model.get_audio_embedding,
             )
-        
+
         def compute_text_embedding(text_batch):
             return self.caco_model.apply(
                 {'params': self.params},
@@ -144,19 +145,21 @@ class CacoModel(BaseModel):
                 normalize=True,
                 method=self.caco_model.get_text_embedding,
             )
-        self.compute_audio_embedding = compute_audio_embedding
-        self.compute_text_embedding = compute_text_embedding
+        self.compute_audio_embedding = jax.jit(compute_audio_embedding)
+        self.compute_text_embedding = jax.jit(compute_text_embedding)
         # self.a_apply = jax.pmap(compute_audio_embedding, axis_name='dp')
         # self.t_apply = jax.pmap(compute_text_embedding, axis_name='dp')
+        self.compute_mel_spec_audiomae_jax = tf2jax.convert_functional(compute_mel_spec_audiomae, jnp.zeros(96000))
+        def process_sample(sample):
+            spectrogram = self.compute_mel_spec_audiomae_jax(sample)
+            x, time_inds, freq_inds, audio_mask = process_spectrogram(spectrogram)
+            return x, time_inds, freq_inds, audio_mask
+        self.process_audio = jax.jit(jax.vmap(process_sample))
 
     def embed_audio(self, audio: torch.Tensor, sample_rate: int) -> jnp.array:
-        ans = []
-        for sample in audio:
-            data_dict = load_from_list(sample, "", sample_rate)
-            audio_batch = _dataset_process_map(data_dict, self.seed, self.config)
-            embedding = self.compute_audio_embedding(audio_batch)
-            ans.append(embedding)
-        return jnp.array(ans)
+        audio = jnp.array(audio)
+        x, time_inds, freq_inds, audio_mask = self.process_audio(audio)
+        return self.compute_audio_embedding(x, time_inds, freq_inds, audio_mask)
         
 
     # def embed_text(self, text: Union[str, Iterable[str]]) -> torch.Tensor:

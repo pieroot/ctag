@@ -1,5 +1,7 @@
 import tensorflow as tf
 import tensorflow_io as tfio
+import tf2jax
+import jax
 
 def load_from_list(audio, description, sample_rate):
     data_dict = {}
@@ -8,6 +10,7 @@ def load_from_list(audio, description, sample_rate):
     data_dict['synthetic_text'] = tf.reshape(tf.convert_to_tensor(()), (0, 1))
     return data_dict
 
+@tf.function
 def compute_mel_spec_audiomae(audio_tensor, 
                               hop_length: int=160,
                               window_length: int=400,
@@ -21,3 +24,5 @@ def compute_mel_spec_audiomae(audio_tensor,
     mel_spec = tfio.audio.melscale(spec, rate=sample_rate, mels=num_mels, fmin=0, fmax=sample_rate/2)
     mel_spec = tf.math.log(mel_spec+1e-5) * scale + bias
     return mel_spec
+
+
