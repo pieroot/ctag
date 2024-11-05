@@ -61,11 +61,15 @@ def _dataset_process_map(
 
     spectrogram = batch['spectrogram']
 
+    print(spectrogram.shape)
     # remove residual patches
     spectrogram = spectrogram[:int(tf.shape(spectrogram)[0]//config.time_patch_size*config.time_patch_size)]
     num_time_patches, num_freq_patches = tf.shape(spectrogram)[0]//config.time_patch_size, tf.shape(spectrogram)[1]//config.freq_patch_size
     full_patch_size = num_time_patches * num_freq_patches
     
+    print(spectrogram.shape)
+    print(num_time_patches, config.time_patch_size, num_freq_patches, config.freq_patch_size)
+
     x = tf.reshape(spectrogram, [num_time_patches, config.time_patch_size, 
                                  num_freq_patches, config.freq_patch_size])
 

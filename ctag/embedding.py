@@ -111,7 +111,7 @@ class CacoModel(BaseModel):
         self.model_dict = load_caco(ckpt_path)
         self.caco_model = self.model_dict['caco_model']
         self.tokenizer = self.model_dict['tokenizer']
-        self.params = flax.jax_utils.replicate(self.model_dict['caco_params'], devices=jax.local_devices())
+        self.params = self.model_dict['caco_params']
 
         self.config = DatasetConfig(batch_size=1,
                                     patches_seq_len=5000,
@@ -119,15 +119,15 @@ class CacoModel(BaseModel):
                                     freq_patch_size=16,
                                     max_text_len=100,
                                     synthetic_prob=0.8)
-        self.seed = [42]
+        self.seed = [42, 3]
         
         def compute_audio_embedding(audio_batch):
             return self.caco_model.apply(
                 {'params': self.params},
-                audio_patches=audio_batch['audio_patches'],
-                audio_time_inds=audio_batch['audio_time_inds'],
-                audio_freq_inds=audio_batch['audio_freq_inds'],
-                audio_mask=audio_batch['audio_mask'],
+                audio_patches = jnp.expand_dims(jnp.array(audio_batch['audio_patches']), axis=0),
+                audio_time_inds = jnp.expand_dims(jnp.array(audio_batch['audio_time_inds']), axis=0),
+                audio_freq_inds = jnp.expand_dims(jnp.array(audio_batch['audio_freq_inds']), axis=0),
+                audio_mask = jnp.expand_dims(jnp.array(audio_batch['audio_mask']), axis=0),
                 deterministic=True,
                 return_hidden_state=False,
                 normalize=True,
@@ -144,53 +144,52 @@ class CacoModel(BaseModel):
                 normalize=True,
                 method=self.caco_model.get_text_embedding,
             )
+        self.compute_audio_embedding = compute_audio_embedding
+        self.compute_text_embedding = compute_text_embedding
+        # self.a_apply = jax.pmap(compute_audio_embedding, axis_name='dp')
+        # self.t_apply = jax.pmap(compute_text_embedding, axis_name='dp')
+
+    def embed_audio(self, audio: torch.Tensor, sample_rate: int) -> jnp.array:
+        ans = []
+        for sample in audio:
+            data_dict = load_from_list(sample, "", sample_rate)
+            audio_batch = _dataset_process_map(data_dict, self.seed, self.config)
+            embedding = self.compute_audio_embedding(audio_batch)
+            ans.append(embedding)
+        return jnp.array(ans)
         
-        self.a_apply = jax.pmap(compute_audio_embedding, axis_name='dp')
-        self.t_apply = jax.pmap(compute_text_embedding, axis_name='dp')
 
-
-    def embed_audio(self, audio: torch.Tensor, sample_rate: int) -> torch.Tensor:
-        data_dict = load_from_list(audio, "", sample_rate)
-        audio_batch = _dataset_process_map(data_dict, self.seed, self.config)
-        embedding = self.a_apply(audio_batch)
-        return torch.tensor(embedding.numpy())
-    
-    def embed_text(self, text: Union[str, Iterable[str]]) -> torch.Tensor:
-        all_text_embeddings = []
-        for class_text in text:
-            tokenized = self.tokenizer("" + class_text, 
-                                padding='max_length', 
-                                truncation=True,
-                                max_length=10, 
-                                return_tensors='np')
-            text_input_ids, text_mask = tokenized['input_ids'], tokenized['attention_mask']
-            text_batch = dict(text_input_ids=text_input_ids,
-                            text_mask=text_mask)
-            text_batch = jax.tree_util.tree_map(
-                lambda x: rearrange(jnp.asarray(x), '(d b) ... -> d b ...', d=jax.local_device_count()),
-                text_batch
-            )
-            text_embedding = self.t_apply(text_batch)
-            all_text_embeddings.append(text_embedding)
-        all_text_embeddings = jnp.concatenate(all_text_embeddings, axis=0)
-        all_text_embeddings = jnp.squeeze(all_text_embeddings, axis=1)
-
-        return torch.from_numpy(jnp.array(all_text_embeddings))
-    
     # def embed_text(self, text: Union[str, Iterable[str]]) -> torch.Tensor:
-    #     embeddings = []
-    #     for text_sample in text:
-    #         tokenized = self.tokenizer(["" + text_sample], 
+    #     all_text_embeddings = []
+    #     for class_text in text:
+    #         tokenized = self.tokenizer("" + class_text, 
     #                             padding='max_length', 
     #                             truncation=True,
     #                             max_length=10, 
     #                             return_tensors='np')
-    #         text_input_ids, text_mask = jnp.array(tokenized['input_ids']), jnp.array(tokenized['attention_mask'])
-    #         text_batch = {
-    #             'text_input_ids': text_input_ids,
-    #             'text_mask': text_mask
-    #         }
-    #         embeddings.append(
-    #             embedding = self.t_apply(text_batch)
+    #         text_input_ids, text_mask = tokenized['input_ids'], tokenized['attention_mask']
+    #         text_batch = dict(text_input_ids=text_input_ids,
+    #                         text_mask=text_mask)
+    #         text_batch = jax.tree_util.tree_map(
+    #             lambda x: rearrange(jnp.asarray(x), '(d b) ... -> d b ...', d=jax.local_device_count()),
+    #             text_batch
     #         )
-    #     return torch.stack(embeddings)
+    #         text_embedding = self.t_apply(text_batch)
+    #         all_text_embeddings.append(text_embedding)
+    #     all_text_embeddings = jnp.concatenate(all_text_embeddings, axis=0)
+    #     all_text_embeddings = jnp.squeeze(all_text_embeddings, axis=1)
+
+    #     return torch.from_numpy(jnp.array(all_text_embeddings))
+    
+    def embed_text(self, text: Union[str, Iterable[str]]) -> jnp.array:
+        tokenized = self.tokenizer(text, 
+                            padding='max_length', 
+                            truncation=True,
+                            max_length=77, 
+                            return_tensors='np')
+        text_input_ids, text_mask = jnp.array(tokenized['input_ids']), jnp.array(tokenized['attention_mask'])
+        text_batch = {
+            'text_input_ids': text_input_ids,
+            'text_mask': text_mask
+        }
+        return self.compute_text_embedding(text_batch)

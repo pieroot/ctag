@@ -75,7 +75,7 @@ class CACO(nn.Module):
     decoder_module: Optional[nn.Module]
     
     def setup(self):
-        self.logit_scale = self.param('logit_scale', lambda _: jnp.array([self.caco_config.logit_scale_init_value]))
+        self.logit_scale = self.param('logit_scale', lambda _: jnp.array(self.caco_config.logit_scale_init_value))
         proj_size = self.caco_config.projection_size
         self.text_proj = nn.Dense(
             proj_size,

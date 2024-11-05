@@ -325,20 +325,19 @@ def evaluate(
     """
     # Generate audio for each
     audios = synth_apply(synth_params)
-    audios_torch = torch.from_numpy(np.asarray(audios)).to(model.device)
+    # audios_torch = torch.from_numpy(np.asarray(audios)).to(model.device)
 
     # Calculate all audio embeddings
-    prompt = torch.atleast_2d(prompt)
-    audios = torch.atleast_2d(audios_torch)
+    # prompt = torch.atleast_2d(prompt)
+    # audios = torch.atleast_2d(audios_torch)
 
     audio_embeddings = model.embed_audio(audios, int(synth.sample_rate))
 
     # Calculate the similarity with the prompt
     similarity = audio_embeddings @ prompt.T
-    similarity_jax = jnp.asarray(similarity.cpu())
 
     # Return the similarity score, as evosax minimizes the objective function
-    return -similarity_jax.squeeze()
+    return -similarity.squeeze()
 
 if __name__ == "__main__":
     main()
